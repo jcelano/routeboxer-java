@@ -10,10 +10,11 @@ Copy this java file into your project
 
 ## Usage
 
+```java
 double range = 1.60934;  //this is in K
 List<LatLng> path = getTestBoxes(); //get a list of lat/lng object that describe the route
 List<LatLngBounds> results = b.box(path,range);  //returns a list boxes that describe the route
-
+```
 
 ## Contributing
 
