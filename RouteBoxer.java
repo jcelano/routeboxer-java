@@ -1,21 +1,17 @@
-package com.villefluide.fluideinfo.ejb.service.utils;
+package com.nuride.map;
 
-import java.text.DecimalFormat;
-import java.text.DecimalFormatSymbols;
-import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
-import org.codehaus.jettison.json.JSONArray;
-import org.codehaus.jettison.json.JSONException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 
 public class RouteBoxer {
-	protected final Logger logger = LoggerFactory.getLogger(this.getClass());
 
-	private static final int EarthRadiusKm = 6371;
+	private static Log logger = LogFactory.getLog(RouteBoxer.class);
+	private static final int R = 6371;  // earth radius
+	public static final String VERSION = "1.0.1";
+	private static final double DOUBLE_FUDGE = 0.000000;  // used to determine if doubles are close enough to equal
 
 	/**
 	 * @author Cedric NICOLAS
@@ -23,7 +19,7 @@ public class RouteBoxer {
 	 * Utility minimal LatLng class for the need of route boxer 
 	 *
 	 */
-	public class LatLng implements Cloneable {
+	public static class LatLng {
 		public double lat;
 		public double lng;
 		public LatLng() {
@@ -50,36 +46,24 @@ public class RouteBoxer {
 		public double lngRad() {
 			return toRad(lng);
 		}
+		
+		public LatLng rhumbDestinationPoint(double brngIn, double dist) {
+		    final double d = dist / R;  // d = angular distance covered on earth's surface
+		    final double lat1 = toRad(this.lat()), lon1 =toRad(this.lng());
+		    final double brng = toRad(brngIn);
 
+		    double lat2 = lat1 + d * Math.cos(brng);
+		    double dLat = lat2 - lat1;
+		    double dPhi = Math.log(Math.tan(lat2 / 2 + Math.PI / 4) / Math.tan(lat1 / 2 + Math.PI / 4));
+		    double q = (Math.abs(dLat) > DOUBLE_FUDGE) ? dLat / dPhi : Math.cos(lat1);
+		    double dLon = d * Math.sin(brng) / q;
+		    // check for going past the pole
+		    if (Math.abs(lat2) > Math.PI / 2) {
+		        lat2 = lat2 > 0 ? Math.PI - lat2 : - (Math.PI - lat2);
+		    }
+		    double lon2 = (lon1 + dLon + Math.PI) % (2 * Math.PI) - Math.PI;
 
-		/**
-		 * A ‘rhumb line’ (or loxodrome) is a path of constant bearing, which crosses all meridians at the same angle.
-		 * see http://www.movable-type.co.uk/scripts/latlong.html
-		 * @param brng
-		 * @param dist
-		 * @return
-		 */
-		public LatLng rhumbDestinationPoint(double brng, double dist) {
-			double R = 6378137;
-			double d = dist/R;  // d = angular distance covered on earth’s surface
-			double lat1 = latRad(), lon1 = lngRad();
-			brng = toRad(brng);
-
-			double dLat = d*Math.cos(brng);
-			// nasty kludge to overcome ill-conditioned results around parallels of latitude:
-			if (Math.abs(dLat) < 1e-10) dLat = 0; // dLat < 1 mm
-
-			double lat2 = lat1 + dLat;
-			double dPhi = Math.log(Math.tan(lat2/2+Math.PI/4)/Math.tan(lat1/2+Math.PI/4));
-			double q = (dPhi!=0) ? dLat/dPhi : Math.cos(lat1);  // E-W line gives dPhi=0
-			double dLon = d*Math.sin(brng)/q;
-
-			// check for some daft bugger going past the pole, normalise latitude if so
-			if (Math.abs(lat2) > Math.PI/2) lat2 = lat2>0 ? Math.PI-lat2 : -Math.PI-lat2;
-
-			double lon2 = (lon1+dLon+3*Math.PI)%(2*Math.PI) - Math.PI;
-
-			return new LatLng(toDeg(lat2), toDeg(lon2));
+		    return new LatLng(toDeg(lat2), toDeg(lon2));
 		};
 
 		/**
@@ -91,49 +75,22 @@ public class RouteBoxer {
 		 */
 		public double rhumbBearingTo(LatLng dest) {
 			double dLon = toRad(dest.lng() - this.lng());
-			double dPhi = Math.log(Math.tan(dest.latRad() / 2 + Math.PI / 4) / Math.tan(this.latRad() / 2 + Math.PI / 4));
+			double dPhi = Math.log(Math.tan(dest.latRad() / (double)2 + Math.PI / (double)4) / Math.tan(this.latRad() / (double)2 + Math.PI / (double)4));
 			if (Math.abs(dLon) > Math.PI) {
-				dLon = dLon > 0 ? -(2 * Math.PI - dLon) : (2 * Math.PI + dLon);
+				dLon = dLon > 0 ? -((double)2 * Math.PI - dLon) : ((double)2 * Math.PI + dLon);
 			}
 			return toBrng(Math.atan2(dLon, dPhi));
 		};
 		
-		public String toString() {
-			return formatLatOrLong(lat)+","+formatLatOrLong(lng);
-		}
-		
-		private String formatLatOrLong(double latOrLng) {
-			NumberFormat nf;
-			DecimalFormatSymbols fts = new DecimalFormatSymbols(Locale.US);
-			nf = new DecimalFormat("##0.000000",fts);
-			return nf.format(latOrLng);
-		}
-		
-		public JSONArray toJSONArray() {
-			JSONArray latLngJSON = new JSONArray();
-			try {
-				latLngJSON.put(0, Double.toString(lat));
-				latLngJSON.put(1, Double.toString(lng));
-			} catch (JSONException e) {
-				
-			}
-			return latLngJSON;
-		}
 
+		public String toString() {
+			return (lat)+","+(lng);
+		}
+		
 		public LatLng clone() {
 			return new LatLng(lat,lng);
 		}
 		
-		public double distanceFrom(LatLng otherLatLng) {
-				double b = lat() * Math.PI / 180.;
-				double c = otherLatLng.lat() * Math.PI / 180.;
-				double d = b - c;
-				double e = lng() * Math.PI / 180. - otherLatLng.lng() * Math.PI / 180.;
-
-				double f = 2. * Math.asin(Math.sqrt(Math.pow(Math.sin(d / 2.), 2.) + Math.cos(b) * Math.cos(c)
-						* Math.pow(Math.sin(e / 2.), 2.)));
-				return f * 6378137.;
-		}
 	}
 
 	/**
@@ -183,7 +140,7 @@ public class RouteBoxer {
 
 		public void extend(LatLng latLng) {
 			if (southwest==null) {
-				southwest=latLng.clone();
+				southwest=latLng;
 				if (northeast==null) northeast=latLng.clone();
 				return;
 			}
@@ -212,7 +169,7 @@ public class RouteBoxer {
 		}
 
 		public LatLng getCenter() {
-			return new LatLng(southwest.lat+(northeast.lat-southwest.lat)/2,southwest.lng+(northeast.lng-southwest.lng)/2);
+			return new LatLng(southwest.lat+(northeast.lat-southwest.lat)/(double)2,southwest.lng+(northeast.lng-southwest.lng)/(double)2);
 		}
 
 		@Override
@@ -243,41 +200,6 @@ public class RouteBoxer {
 
 	}
 
-	/**
-	 * utility method to get a LatLng list from an encoded google polyline 
-	 * You need to pass to box() method below such a long list of LatLngs in order to have it works well
-	 * @param encodedPoints
-	 * @return
-	 */
-	public List<LatLng> decodePath(String encodedPoints){
-		ArrayList<LatLng> poly = new ArrayList<LatLng>();
-		int index = 0, len = encodedPoints.length();
-		int lat = 0, lng = 0;
-		while (index < len) {
-			int b, shift = 0, result = 0;
-			do {
-				b = encodedPoints.charAt(index++) - 63;
-				result |= (b & 0x1f) << shift;
-				shift += 5;
-			} while (b >= 0x20);
-			int dlat = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
-			lat += dlat;
-			shift = 0;
-			result = 0;
-			do {
-				b = encodedPoints.charAt(index++) - 63;
-				result |= (b & 0x1f) << shift;
-				shift += 5;
-			} while (b >= 0x20);
-			int dlng = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
-			lng += dlng;
-			LatLng p = new LatLng((((double) lat / 1E5)),
-					(((double) lng / 1E5)));
-			poly.add(p);
-		}
-		return poly;
-
-	}
 
 	/**
 	 * Generates boxes for a given route and distance
@@ -313,22 +235,74 @@ public class RouteBoxer {
 
 		vertices = path;
 
+		if(logger.isInfoEnabled()){
+			logger.info(new StringBuilder().append("Rouate Boxer v").append(RouteBoxer.VERSION).append(" will create a route from ")
+					.append(vertices.size()).append(" coordinates - ").append(vertices).toString());
+		}
 
 		// Build the grid that is overlaid on the route
 		this.buildGrid_(vertices, range);
 
+		printGrid("Step 1");
 		// Identify the grid cells that the route intersects
 		this.findIntersectingCells_(vertices);
 
+		if(logger.isInfoEnabled()){
+			printGrid("After findIntersectingCells_");
+		}
 		// Merge adjacent intersected grid cells (and their neighbours) into two sets
 		//  of bounds, both of which cover them completely
 		this.mergeIntersectingCells_();
 
+		printGrid("After mergeIntersectingCells_");
 		// Return the set of merged bounds that has the fewest elements
-		return (this.boxesX_.size() <= this.boxesY_.size() ?
-				this.boxesX_ :
-					this.boxesY_);
+		
+
+		List<LatLngBounds> ret = (this.boxesX_.size() <= this.boxesY_.size() ? this.boxesX_ : this.boxesY_);
+		
+		if(logger.isInfoEnabled()){
+			StringBuilder ss = new StringBuilder();
+			ss.append("RouuteBoxer made ").append(ret.size()).append(" boxes (").append(this.boxesX_.size()).append(" xboxes and ").append(this.boxesY_.size()).append(" yboxes) they are: ");
+			for(LatLngBounds bounds : ret){
+				LatLng ne = bounds.getNorthEast();
+				LatLng sw = bounds.getSouthWest();
+				ss.append(String.format("%s,%s,%s,%s,", ne.lat, sw.lat, ne.lng, sw.lng));
+			}
+			ss.setLength(ss.length()-1);
+			logger.info(ss.toString());
+			
+		}
+
+
+		return ret;
 	};
+	
+	private void printGrid(String msg){
+		System.out.println("===================================================================");
+		System.out.println("======================START: " + msg + " =============================");
+		System.out.println("===================================================================");
+
+		for(int lng=0;lng<this.grid_.length;++lng){
+			StringBuilder row = new StringBuilder();
+			for(int lat = 0;lat<this.grid_[lng].length;++lat){
+				row.append("").append(this.grid_[lng][lat]).append("|");
+			}
+			System.out.println(row.toString());
+		}
+		
+
+		StringBuilder lats = new StringBuilder();
+		lats.append(this.latGrid_.size()).append( " lats --> ");
+		for(int lat = 0;lat<this.latGrid_.size();++lat){
+			lats.append(this.latGrid_.get(lat));
+		}
+		System.out.println(lats.toString());
+		
+		System.out.println("===================================================================");
+		System.out.println("======================END: " + msg + " =============================");
+		System.out.println("===================================================================");
+
+	}
 
 	/**
 	 * Generates boxes for a given route and distance
@@ -340,9 +314,11 @@ public class RouteBoxer {
 
 		// Create a LatLngBounds object that contains the whole path
 		LatLngBounds routeBounds = new LatLngBounds();
-		//logger.trace("vertices[0]"+vertices.get(0).toString()+" vertices["+(vertices.size()-1)+"] "+vertices.get(vertices.size()-1).toString());
+		logger.trace("vertices[0]"+vertices.get(0).toString()+" vertices["+(vertices.size()-1)+"] "+vertices.get(vertices.size()-1).toString());
 		for (int i = 0; i < vertices.size(); i++) {
-			routeBounds.extend(vertices.get(i));
+			//need to clone this otherwise, it affects the list order and messes things up!
+			LatLng latLng = vertices.get(i).clone();
+			routeBounds.extend(latLng);
 		}
 		//logger.trace("routeBounds "+routeBounds.toString());
 		// Find the center of the bounding box of the path
@@ -352,17 +328,20 @@ public class RouteBoxer {
 		//  extend beyond the edge of the bounding box by more than one cell
 		this.latGrid_.add(routeBoundsCenter.lat());
 		LatLng rhumb = routeBoundsCenter.rhumbDestinationPoint(0, range);
+		
+		logger.info("The route bounds is:" + String.format("%s,%s,%s,%s", routeBounds.getNorthEast().lat(), routeBounds.getSouthWest().lat, routeBounds.getNorthEast().lng, routeBounds.getSouthWest().lng));
+		
 		//logger.trace("rhumb 1 "+rhumb.toString());
 		// Add lines from the center out to the north
 		this.latGrid_.add(rhumb.lat());
-		for (int i = 2; this.latGrid_.get(i - 2) < routeBounds.getNorthEast().lat(); i++) {
-			this.latGrid_.add(routeBoundsCenter.rhumbDestinationPoint(0, range * i).lat());
+		for (int i = 2;  (this.latGrid_.get(i - 2) - routeBounds.getNorthEast().lat())<DOUBLE_FUDGE; i++) {
+			this.latGrid_.add(routeBoundsCenter.rhumbDestinationPoint(0, range * (double)i).lat());
 			
 		}
 		//logger.trace("pass1 latGrid size"+latGrid_.size());
 		// Add lines from the center out to the south  
-		for (int i1 = 1; this.latGrid_.get(1) > routeBounds.getSouthWest().lat(); i1++) {
-			this.latGrid_.add(0,routeBoundsCenter.rhumbDestinationPoint(180, range * i1).lat());
+		for (int i1 = 1; (this.latGrid_.get(1) - routeBounds.getSouthWest().lat())>DOUBLE_FUDGE; i1++) {
+			this.latGrid_.add(0,routeBoundsCenter.rhumbDestinationPoint(180, range * (double)i1).lat());
 		}
 		//logger.trace("pass2 latGrid size"+latGrid_.size());
 		// Starting from the center define grid lines outwards horizontally until they
@@ -371,20 +350,34 @@ public class RouteBoxer {
 
 		// Add lines from the center out to the east
 		this.lngGrid_.add(routeBoundsCenter.rhumbDestinationPoint(90, range).lng());
-		for (int i2 = 2; this.lngGrid_.get(i2 - 2) < routeBounds.getNorthEast().lng(); i2++) {
-			this.lngGrid_.add(routeBoundsCenter.rhumbDestinationPoint(90, range * i2).lng());
+		for (int i2 = 2; (this.lngGrid_.get(i2 - 2) < routeBounds.getNorthEast().lng()); i2++) {
+			
+//			String msg = new StringBuilder().append("this.lngGrid_.get(i2 - 2)=").append(this.lngGrid_.get(i2 - 2))
+//					.append(" routeBounds.getNorthEast().lng()=").append(routeBounds.getNorthEast().lng())
+//					.append(" adding - routeBoundsCenter.rhumbDestinationPoint(90, range * (double)i2).lng()= ").append(routeBoundsCenter.rhumbDestinationPoint(90, range * (double)i2).lng())
+//					.toString();
+//			debug(msg);
+
+			
+			this.lngGrid_.add(routeBoundsCenter.rhumbDestinationPoint(90, range * (double)i2).lng());
 		}
+		
+		
 		//logger.trace("pass1 lngGrid_ size"+lngGrid_.size());
 		// Add lines from the center out to the west
-		for (int i3 = 1; this.lngGrid_.get(1) > routeBounds.getSouthWest().lng(); i3++) {
-			this.lngGrid_.add(0,routeBoundsCenter.rhumbDestinationPoint(270, range * i3).lng());
-		}
-		//logger.trace("pass2 lngGrid_ size"+lngGrid_.size());
+		for (int i3 = 1; (this.lngGrid_.get(1) - routeBounds.getSouthWest().lng())>DOUBLE_FUDGE; i3++) {
+			
 
+			this.lngGrid_.add(0,routeBoundsCenter.rhumbDestinationPoint(270, range * (double)i3).lng());
+		}
 		// Create a two dimensional array representing this grid
 		this.grid_ = new int[this.lngGrid_.size()][this.latGrid_.size()];
 	};
 
+//	private static void debug(String msg){
+//		System.out.println(msg);
+//	}
+	
 	/**
 	 * Find all of the cells in the overlaid grid that the path intersects
 	 *
@@ -399,7 +392,6 @@ public class RouteBoxer {
 
 		// Work through each vertex on the path identifying which grid cell it is in
 		for (int i = 1; i < vertices.size(); i++) {
-			//logger.trace("findIntersectingCells_ i "+i);
 			// Use the known cell of the previous vertex to help find the cell of this vertex
 			int[] gridXY = this.getGridCoordsFromHint_(vertices.get(i), vertices.get(i - 1), hintXY);
 			//logger.trace("findIntersectingCells_ gridXY "+gridXY[0]+" "+gridXY[1]);
@@ -466,7 +458,7 @@ public class RouteBoxer {
 				for (y = hint[1]; this.latGrid_.get(y) > latlng.lat(); y--) {}
 			}
 		} catch (IndexOutOfBoundsException e) {
-			logger.warn("getGridCoordsFromHint_ IndexOutOfBoundsException x"+x+" y "+y);
+			logger.error("getGridCoordsFromHint_ IndexOutOfBoundsException x"+x+" y "+y);
 		}
 		int[] result = {x, y};
 		return result;
@@ -499,6 +491,11 @@ public class RouteBoxer {
 
 		LatLng hint = start;
 		int[] hintXY = startXY;
+		
+		if(startXY[0]<1 || startXY[1]< 1){
+			//this is an invalid point
+			return;
+		}
 
 		// Handle a line segment that travels south first
 		if (end.lat() > start.lat()) {
@@ -563,7 +560,7 @@ public class RouteBoxer {
 	 *                    the grid line
 	 */ 
 	private LatLng getGridIntersect_(LatLng start, double brng, double gridLineLat) {
-		double d = EarthRadiusKm * ((toRad(gridLineLat) - start.latRad()) / Math.cos(toRad(brng)));
+		double d = R * ((toRad(gridLineLat) - start.latRad()) / Math.cos(toRad(brng)));
 		return start.rhumbDestinationPoint(brng, d);
 	};
 
@@ -611,7 +608,7 @@ public class RouteBoxer {
 		this.grid_[x][y + 1] = 1;
 		this.grid_[x + 1][y + 1] = 1;
 		} catch (IndexOutOfBoundsException e) {
-			logger.warn("markCell_ IndexOutOfBoundsException x"+x+" y "+y);
+			logger.trace("markCell_ IndexOutOfBoundsException x"+x+" y "+y);
 		}
 	};
 
@@ -635,6 +632,11 @@ public class RouteBoxer {
 		// The box we are currently expanding with new cells
 		LatLngBounds currentBox = null;
 
+		//this.grid_ = new int[this.lngGrid_.size()][this.latGrid_.size()];
+		if(logger.isTraceEnabled()){
+			logger.trace("this.grid_[0].length=" + this.grid_[0].length + " this.lngGrid_.size())=" + this.lngGrid_.size());
+			logger.trace("this.grid_.length=" + this.grid_.length + " this.latGrid_.size())=" + this.latGrid_.size());
+		}
 		// Traverse the grid a row at a time
 		for (y = 0; y < this.grid_[0].length; y++) {
 			for (x = 0; x < this.grid_.length; x++) {
@@ -645,7 +647,16 @@ public class RouteBoxer {
 					// Otherwise start a new box.
 					int[] cell = {x, y};
 					box = this.getCellBounds_(cell);
+					if(box == null){
+						if(logger.isTraceEnabled()){
+							logger.trace("y skipping box " + x + " x" + y);
+						}
+						continue;
+					}
 					if (currentBox!=null) {
+						if(logger.isTraceEnabled()){
+							logger.trace("y extending box " + box+ " " + x + "x" + y);
+						}
 						currentBox.extend(box.getNorthEast());
 					} else {
 						currentBox = box;
@@ -655,6 +666,9 @@ public class RouteBoxer {
 					// This cell is not marked for inclusion. If the previous cell was
 					//  marked for inclusion, merge it's box with a box that spans the same
 					//  columns from the row below if possible.
+					if(logger.isTraceEnabled()){
+						logger.trace("y merging box " + currentBox + " " + x + " x" + y);
+					}
 					this.mergeBoxesY_(currentBox);
 					currentBox = null;
 				}
@@ -677,6 +691,15 @@ public class RouteBoxer {
 					if (currentBox!=null) {
 
 						box = this.getCellBounds_(cell);
+						if(box == null){
+							if(logger.isTraceEnabled()){
+								logger.trace("x skipping box " + x + " x" + y);
+							}
+							continue;
+						}
+						if(logger.isTraceEnabled()){
+							logger.trace("x extending box " + box+ " " + x + "x" + y);
+						}
 						currentBox.extend(box.getNorthEast());
 					} else {
 						currentBox = this.getCellBounds_(cell);
@@ -686,6 +709,9 @@ public class RouteBoxer {
 					// This cell is not marked for inclusion. If the previous cell was
 					//  marked for inclusion, merge it's box with a box that spans the same
 					//  rows from the column to the left if possible.
+					if(logger.isTraceEnabled()){
+						logger.trace("x merging box " + currentBox + " " + x + " x" + y);
+					}
 					this.mergeBoxesX_(currentBox);
 					currentBox = null;
 
@@ -708,9 +734,7 @@ public class RouteBoxer {
 	public void mergeBoxesX_ (LatLngBounds box) {
 		if (box != null) {
 			for (int i = 0; i < this.boxesX_.size(); i++) {
-				if (Math.abs(this.boxesX_.get(i).getNorthEast().lng()- box.getSouthWest().lng())<0.001 &&
-						Math.abs(this.boxesX_.get(i).getSouthWest().lat() -box.getSouthWest().lat())<0.001 &&
-						Math.abs(this.boxesX_.get(i).getNorthEast().lat() -box.getNorthEast().lat())<0.001) {
+				if(LatLngBoundsEq_(box, this.boxesX_.get(i))){
 					this.boxesX_.get(i).extend(box.getNorthEast());
 					return;
 				}
@@ -725,13 +749,11 @@ public class RouteBoxer {
 	 * is not found, append this box to the list of existing boxes.
 	 *
 	 * @param {LatLngBounds}  The box to merge
-	 */ 
+	 */ 	
 	public void mergeBoxesY_(LatLngBounds box) {
 		if (box != null) {
 			for (int i = 0; i < this.boxesY_.size(); i++) {
-				if (Math.abs(this.boxesY_.get(i).getNorthEast().lat() - box.getSouthWest().lat())<0.001 &&
-						Math.abs(this.boxesY_.get(i).getSouthWest().lng() - box.getSouthWest().lng())<0.001 &&
-						Math.abs(this.boxesY_.get(i).getNorthEast().lng() - box.getNorthEast().lng())<0.001) {
+				if(LatLngBoundsEq_(box, this.boxesY_.get(i))){
 					this.boxesY_.get(i).extend(box.getNorthEast());
 					return;
 				}
@@ -740,6 +762,20 @@ public class RouteBoxer {
 		}
 	};
 
+
+	private static boolean LatLngBoundsEq_(LatLngBounds b1, LatLngBounds b2){
+		return latLngEq_(b1.getNorthEast() , b2.getNorthEast()) && latLngEq_(b1.getSouthWest() , b2.getSouthWest());
+	}
+
+	
+	private static boolean latLngEq_(LatLng l1, LatLng l2){
+		return eq_(l1.lat() , l2.lat()) && eq_(l1.lng() , l2.lng());
+	}
+	
+	private static boolean eq_(double c1, double c2){
+		return Math.abs(c1 - c2) < DOUBLE_FUDGE;
+	}
+
 	/**
 	 * Obtain the LatLng of the origin of a cell on the grid
 	 *
@@ -747,6 +783,14 @@ public class RouteBoxer {
 	 * @return {LatLng} The latlng of the origin of the cell.
 	 */ 
 	LatLngBounds getCellBounds_(int[] cell) {
+		
+
+		if(this.latGrid_.size() <= cell[1]+1
+				|| this.lngGrid_.size() <= cell[0]+1
+				|| cell[0] < 0 || cell[1] < 0){
+			return null;
+		}
+		
 		return new LatLngBounds(
 				new LatLng(this.latGrid_.get(cell[1]), this.lngGrid_.get(cell[0])),
 				new LatLng(this.latGrid_.get(cell[1]+1), this.lngGrid_.get(cell[0]+1)));
@@ -760,7 +804,7 @@ public class RouteBoxer {
 	 * @return {Number} Bearing in radians
 	 * @ignore
 	 */ 
-	public double toRad(double value) {
+	public static double toRad(double value) {
 		return value * Math.PI / 180;
 	};
 
@@ -770,7 +814,7 @@ public class RouteBoxer {
 	 * @return {Number} Bearing in degrees
 	 * @ignore
 	 */ 
-	public double toDeg(double value) {
+	public static double toDeg(double value) {
 		return value * 180 / Math.PI;
 	};
 
@@ -780,7 +824,16 @@ public class RouteBoxer {
 	 * @return {Number} Return 
 	 * @ignore
 	 */ 
-	public double toBrng(double value) {
+	public static double toBrng(double value) {
 		return (toDeg(value) + 360) % 360;
 	};
+	
+	public static MapRectangle latLngBoundsToMapRectangle(LatLngBounds b){
+		return new MapRectangle(latLngToCoordinate(b.southwest), latLngToCoordinate(b.northeast));
+	}
+	
+	public static Coordinate latLngToCoordinate(LatLng l){
+		return new Coordinate(l.lng, l.lat);
+	}
+	
 }
